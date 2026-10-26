@@ -1,0 +1,40 @@
+name: Build Custom HFS Windows x64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout source code
+      uses: actions/checkout@v4
+      with:
+        ref: main
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
+    - name: Install Project Dependencies
+      run: |
+        npm ci
+        npm run postinstall
+
+    - name: Compile Admin Panel & Frontend
+      run: |
+        npm run build --workspace=admin
+        npm run build --workspace=frontend
+
+    - name: Package to Windows EXE (pkg)
+      run: |
+        npm run dist-modules
+        npx pkg . --targets node20-win-x64 --output dist/hfs-windows-x64-3.3.4.exe
+
+    - name: Save and Upload Finished File
+      uses: actions/upload-artifact@v4
+      with:
+        name: hfs-windows-x64-custom
+        path: dist/hfs-windows-x64-3.3.4.exe
