@@ -16,7 +16,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: 20 # Используем Node 20, так как под нее у pkg есть стабильные бинарники
+        node-version: 24 # Синхронизируем окружение с актуальными требованиями GitHub
 
     - name: Install Monorepo Dependencies
       run: |
@@ -25,10 +25,10 @@ jobs:
     - name: Inject Cleanup Script and Compile Frontend
       shell: powershell
       run: |
-        # Собираем фронтенд админки
+        # Компилируем админку фронтенда
         npx esbuild admin/src/index.ts --bundle --minify --platform=browser --outfile=admin/index.js
         
-        # Создаем скрипт очистки
+        # Создаем кастомный скрипт очистки
         $cleanScript = @'
         const bypassHome = () => {
             if (window.location.pathname.endsWith('/admin') || window.location.pathname.endsWith('/admin/')) {
@@ -62,16 +62,16 @@ jobs:
         '@
         Set-Content -Path "clean.js" -Value $cleanScript -Encoding utf8
         
-        # Безопасно склеиваем файлы
+        # Объединяем ассеты
         Get-Content admin/index.js, clean.js | Set-Content admin/index.js.tmp
         Move-Item -Force admin/index.js.tmp admin/index.js
         
-        # Собираем основной публичный фронтенд
+        # Компилируем основной фронтенд
         npx esbuild frontend/src/index.ts --bundle --minify --platform=browser --outfile=frontend/index.js
 
     - name: Compile Backend Server
       run: |
-        npx esbuild src/index.ts --bundle --platform=node --target=node20 --outfile=src/index.js --external:@hfs/shared --external:fsevents
+        npx esbuild src/index.ts --bundle --platform=node --target=node24 --outfile=src/index.js --external:@hfs/shared --external:fsevents
 
     - name: Prepare Windows Distribution Folder
       shell: powershell
@@ -84,14 +84,14 @@ jobs:
         Copy-Item -Recurse -Force "src" -Destination "dist\src"
         Copy-Item -Recurse -Force "frontend" -Destination "dist\frontend"
 
-        # Корректируем package.json, чтобы pkg понимал структуру
+        # Конфигурируем package.json внутри дистрибутива
         $jsonPath = "dist/package.json"
         $json = Get-Content $jsonPath | ConvertFrom-Json
         $json.PSObject.Properties.Remove('devDependencies')
         $json.PSObject.Properties.Remove('workspaces')
         if ($json.scripts) { $json.scripts.PSObject.Properties.Remove('postinstall') }
         
-        # КРИТИЧНО: Указываем точку входа для pkg и прописываем пути к ассетам
+        # Привязываем точку входа и упаковываем ассеты во внутреннюю файловую систему
         $json | Add-Member -Type NoteProperty -Name "main" -Value "src/index.js" -Force
         $pkgConfig = @{
             assets = @("admin/**/*", "frontend/**/*")
@@ -108,8 +108,8 @@ jobs:
     - name: Force Package to Windows EXE
       run: |
         cd dist
-        # Собираем исполняемый файл непосредственно из папки дистрибутива
-        npx pkg package.json --targets node20-win-x64 --output hfs-windows-x64-3.3.4.exe
+        # Собираем современный бинарник под Node 24 с помощью поддерживаемого форка
+        npx @bcomnes/pkg package.json --targets node24-win-x64 --public --output hfs-windows-x64-3.3.4.exe
 
     - name: Save and Upload Finished File
       uses: actions/upload-artifact@v4
