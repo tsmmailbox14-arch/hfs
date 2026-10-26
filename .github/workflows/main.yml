@@ -1,116 +1,47 @@
-name: Build Custom HFS Windows x64
+name: Build HFS v3 with patched Admin Panel
 
 on:
+  push:
+    branches:
+      - main
+      - master
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: windows-latest
+  build-and-patch:
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source code
+      - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 18
+          cache: 'npm'
 
-      - name: Inject Cleanup Script
-        shell: powershell
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Patch Admin Frontend (Hide HOME tab)
         run: |
-          $cleanScript = @'
-          const bypassHome = () => {
-              if (window.location.pathname.endsWith('/admin') || window.location.pathname.endsWith('/admin/')) {
-                  window.location.replace('/admin/files');
-              }
-          };
-          bypassHome();
-          window.addEventListener('popstate', bypassHome);
-          document.addEventListener('DOMContentLoaded', () => {
-              const cleanAdminPanel = () => {
-                  bypassHome();
-                  const sidebarHomeBtn = document.querySelector('a[href="/admin"], a[href="/admin/"]');
-                  if (sidebarHomeBtn) {
-                      const sidebarItem = sidebarHomeBtn.closest('li');
-                      if (sidebarItem) sidebarItem.remove();
-                  }
-                  document.querySelectorAll('main p, main span, main a, main h4, main h2, main .MuiCard-root, main .MuiPaper-root').forEach(el => {
-                      const nodeText = el.textContent;
-                      if (nodeText.includes('Random plugin') || nodeText.includes('Statistics') || nodeText.includes('Admin panel') || nodeText.includes('documentation') || nodeText.includes('by') || nodeText.includes('Dashboard') || nodeText.includes('working') || nodeText.includes('localhost')) {
-                          const gridItem = el.closest('.MuiGrid-item, .MuiPaper-root, .MuiCard-root');
-                          if (gridItem) gridItem.remove();
-                          else el.remove();
-                      }
-                  });
-                  document.querySelectorAll('[role="alert"], .MuiAlert-root, main img').forEach(node => node.remove());
-              };
-              cleanAdminPanel();
-              setTimeout(cleanAdminPanel, 200);
-              setInterval(cleanAdminPanel, 500);
-          });
-          '@
-          Set-Content -Path "clean.js" -Value $cleanScript -Encoding utf8
-          
-          $htmlPath = "admin/index.html"
-          if (Test-Path $htmlPath) {
-              $htmlContent = Get-Content $htmlPath -Raw
-              $htmlContent = $htmlContent -replace '</body>', '<script src="/clean.js"></script></body>'
-              Set-Content -Path $htmlPath -Value $htmlContent -Encoding utf8
-          }
+          if [ -d "admin/src" ]; then
+            echo 'a[href="#/"], .nav-link[href="#/"], [data-testid="menu-home"] { display: none !important; }' >> admin/src/index.css
+          elif [ -d "frontend/src" ]; then
+            echo 'a[href="#/"], .nav-link[href="#/"], [data-testid="menu-home"] { display: none !important; }' >> frontend/src/index.css
+          else
+            echo 'a[href="#/"], .nav-link[href="#/"], [data-testid="menu-home"] { display: none !important; }' >> src/index.css
+          fi
 
-      - name: Install Monorepo Dependencies
-        run: npm install --legacy-peer-deps
+      - name: Build HFS v3 Project
+        run: npm run build-all || npm run build
 
-      - name: Pre-compile Shared Types
-        run: npx tsc -b shared admin frontend
-
-      - name: Compile Frontend Assets
-        shell: powershell
-        run: |
-          npm run build --workspace=admin
-          npm run build --workspace=frontend
-          if (Test-Path "admin/index.js") {
-              $content = Get-Content "admin/index.js" -Raw
-              $cleanJs = Get-Content "clean.js" -Raw
-              $content = $cleanJs + "`n" + $content
-              Set-Content "admin/index.js.tmp" -Value $content -Encoding utf8
-              Move-Item -Force "admin/index.js.tmp" "admin/index.js"
-          }
-
-      - name: Prepare Crossplatform Distribution
-        shell: powershell
-        run: |
-          New-Item -ItemType Directory -Force -Path dist
-          Copy-Item package.json -Destination dist
-          Copy-Item central.json -Destination dist
-          Copy-Item README.md -Destination dist
-          Copy-Item -Recurse -Force admin -Destination dist/admin
-          Copy-Item -Recurse -Force src -Destination dist/src
-          Copy-Item -Recurse -Force frontend -Destination dist/frontend
-          
-          $jsonPath = "dist/package.json"
-          $json = Get-Content $jsonPath -Raw | ConvertFrom-Json
-          $json.PSObject.Properties.Remove('devDependencies')
-          $json.PSObject.Properties.Remove('workspaces')
-          if ($json.scripts) {
-              $json.scripts.PSObject.Properties.Remove('postinstall')
-          }
-          $json | ConvertTo-Json -Depth 100 | Set-Content $jsonPath
-
-      - name: Install Clean Production Modules
-        run: |
-          cd dist
-          npm install --omit=dev --legacy-peer-deps
-          cd ..
-
-      - name: Force Package to Windows EXE
-        run: npx pkg dist --targets node20-win-x64 --output dist/hfs-windows-x64-3.3.4.exe
-
-      - name: Save and Upload Finished File
+      - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: hfs-windows-x64-custom
-          path: dist/hfs-windows-x64-3.3.4.exe
+          name: hfs-patched-build
+          path: |
+            dist/
+            build/
+            package.json
