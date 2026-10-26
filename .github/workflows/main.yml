@@ -1,28 +1,23 @@
 theme_admin:
   css: |
-    /* 1. Скрываем блок случайного плагина (Random plugin) */
-    main div:has(p:has(span:contains("Random plugin"))),
-    main div:has(> p:contains("Random plugin")),
-    .MuiCard-root:has(span:contains("Random plugin")),
-    div:has(> p:contains("run-files by 8gudbits")) {
-      display: none !important;
+    main div:has(p:has(span)), 
+    main div:has(> p), 
+    .MuiCard-root, 
+    div:has(> p) { 
+      display: none !important; 
     }
 
-    /* 2. Скрываем предупреждение о localhost (You're accessing the Admin-panel without an account...) */
     main .MuiAlert-root, 
-    main div[role="alert"]:contains("localhost") {
-      display: none !important;
+    main div[role="alert"] { 
+      display: none !important; 
     }
 
-    /* 3. Скрываем рекламные картинки, логотипы, ссылки на донаты и документацию */
     main img, 
     main a[href*="rejetto.com"], 
-    main a[href*="github.com"] {
-      display: none !important;
+    main a[href*="github.com"] { 
+      display: none !important; 
     }
 
-    /* 4. Очищаем лишний текст-описание (This is the Admin-panel, where you manage...) */
-    main p:contains("This is the Admin-panel"),
-    main p:contains("See the documentation") {
-      display: none !important;
+    main p { 
+      display: none !important; 
     }
