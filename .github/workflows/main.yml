@@ -1,23 +1,124 @@
-theme_admin:
-  css: |
-    main div:has(p:has(span)), 
-    main div:has(> p), 
-    .MuiCard-root, 
-    div:has(> p) { 
-      display: none !important; 
-    }
+Here is the corrected and optimized GitHub Actions workflow.
 
-    main .MuiAlert-root, 
-    main div[role="alert"] { 
-      display: none !important; 
-    }
+### Key Fixes Applied:
 
-    main img, 
-    main a[href*="rejetto.com"], 
-    main a[href*="github.com"] { 
-      display: none !important; 
-    }
+1. **`pkg` Target Directory:** The original workflow modified `dist/package.json` to remove workspaces and devDependencies, but then ran `npx pkg .` from the root directory (which still used the uncleaned root `package.json`). Changing it to `npx pkg dist` ensures it uses the clean `dist/package.json`.
+2. **PowerShell Compatibility:** The `Compile Frontend Assets` step lacked an explicit PowerShell declaration and used bash-style syntax (`cat`, `>`, `mv -Force`), which can fail or behave unpredictably in GitHub Actions' default PowerShell environment on Windows. It has been updated to use native PowerShell cmdlets (`Get-Content`, `Set-Content`, `Move-Item`).
 
-    main p { 
-      display: none !important; 
-    }
+### Corrected Workflow File
+
+```yaml
+name: Build Custom HFS Windows x64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout source code
+      uses: actions/checkout@v4
+      with:
+        ref: main
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
+    - name: Inject Cleanup Script
+      shell: powershell
+      run: |
+        $cleanScript = @'
+        const bypassHome = () => {
+            if (window.location.pathname.endsWith('/admin') || window.location.pathname.endsWith('/admin/')) {
+                window.location.replace('/~/admin/files');
+            }
+        };
+        bypassHome();
+        window.addEventListener('popstate', bypassHome);
+        document.addEventListener("DOMContentLoaded", () => {
+            const cleanAdminPanel = () => {
+                bypassHome();
+                const sidebarHomeBtn = document.querySelector('a[href="/~/admin"], a[href="/~/admin/"]');
+                if (sidebarHomeBtn) {
+                    const sidebarItem = sidebarHomeBtn.closest('li');
+                    if (sidebarItem) sidebarItem.remove();
+                }
+                document.querySelectorAll('main p, main span, main a, main h4, main h2, main .MuiCard-root, main .MuiPaper-root').forEach(el => {
+                    const nodeText = el.textContent || "";
+                    if (nodeText.includes("Random plugin") || nodeText.includes("Statistics") || nodeText.includes("Admin-panel") || nodeText.includes("documentation") || nodeText.includes("by") || nodeText.includes("Dashboard") || nodeText.includes("working") || nodeText.includes("localhost")) {
+                        const gridItem = el.closest('.MuiGrid-item, .MuiPaper-root, .MuiCard-root');
+                        if (gridItem) gridItem.remove();
+                        else el.remove();
+                    }
+                });
+                document.querySelectorAll('[role="alert"], .MuiAlert-root, main img').forEach(node => node.remove());
+            };
+            cleanAdminPanel();
+            setTimeout(cleanAdminPanel, 200);
+            setInterval(cleanAdminPanel, 500);
+        });
+        '@
+        Set-Content -Path "clean.js" -Value $cleanScript -Encoding utf8
+        
+        $htmlPath = "admin/index.html"
+        if (Test-Path $htmlPath) {
+          $htmlContent = Get-Content $htmlPath -Raw
+          $htmlContent = $htmlContent -replace '</body>', '<script src="/clean.js"></script></body>'
+          Set-Content -Path $htmlPath -Value $htmlContent -Encoding utf8
+        }
+
+    - name: Install Monorepo Dependencies
+      run: |
+        npm install --legacy-peer-deps
+
+    - name: Pre-compile Shared Types
+      run: |
+        npx tsc -b shared admin frontend
+
+    - name: Compile Frontend Assets
+      shell: powershell
+      run: |
+        npm run build --workspace=admin
+        npm run build --workspace=frontend
+        Get-Content admin/index.js, clean.js | Set-Content admin/index.js.tmp
+        Move-Item -Force admin/index.js.tmp admin/index.js
+
+    - name: Prepare Crossplatform Distribution
+      shell: powershell
+      run: |
+        New-Item -ItemType Directory -Force -Path "dist"
+        Copy-Item "package.json" -Destination "dist\"
+        Copy-Item "central.json" -Destination "dist\"
+        Copy-Item "README.md" -Destination "dist\"
+        Copy-Item -Recurse -Force "admin" -Destination "dist\admin"
+        Copy-Item -Recurse -Force "src" -Destination "dist\src"
+        Copy-Item -Recurse -Force "frontend" -Destination "dist\frontend"
+
+        $jsonPath = "dist/package.json"
+        $json = Get-Content $jsonPath | ConvertFrom-Json
+        $json.PSObject.Properties.Remove('devDependencies')
+        $json.PSObject.Properties.Remove('workspaces')
+        if ($json.scripts) { $json.scripts.PSObject.Properties.Remove('postinstall') }
+        $json | ConvertTo-Json -Depth 100 | Set-Content $jsonPath
+
+    - name: Install Clean Production Modules
+      run: |
+        cd dist
+        npm install --omit=dev --legacy-peer-deps
+        cd ..
+
+    - name: Force Package to Windows EXE
+      run: |
+        npx pkg dist --targets node20-win-x64 --output dist/hfs-windows-x64-3.3.4.exe
+
+    - name: Save and Upload Finished File
+      uses: actions/upload-artifact@v4
+      with:
+        name: hfs-windows-x64-custom
+        path: dist/hfs-windows-x64-3.3.4.exe
+
+```
