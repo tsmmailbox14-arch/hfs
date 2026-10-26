@@ -16,19 +16,11 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: 20 # Используем Node 20, так как под нее у pkg есть стабильные бинарники
+        node-version: 20
 
-    - name: Install Monorepo Dependencies
-      run: |
-        npm install --legacy-peer-deps
-
-    - name: Inject Cleanup Script and Compile Frontend
+    - name: Inject Cleanup Script
       shell: powershell
       run: |
-        # Собираем фронтенд админки
-        npx esbuild admin/src/index.ts --bundle --minify --platform=browser --outfile=admin/index.js
-        
-        # Создаем скрипт очистки
         $cleanScript = @'
         const bypassHome = () => {
             if (window.location.pathname.endsWith('/admin') || window.location.pathname.endsWith('/admin/')) {
@@ -62,54 +54,55 @@ jobs:
         '@
         Set-Content -Path "clean.js" -Value $cleanScript -Encoding utf8
         
-        # Безопасно склеиваем файлы
-        Get-Content admin/index.js, clean.js | Set-Content admin/index.js.tmp
-        Move-Item -Force admin/index.js.tmp admin/index.js
-        
-        # Собираем основной публичный фронтенд
-        npx esbuild frontend/src/index.ts --bundle --minify --platform=browser --outfile=frontend/index.js
+        $htmlPath = "admin/index.html"
+        if (Test-Path $htmlPath) {
+          $htmlContent = Get-Content $htmlPath -Raw
+          $htmlContent = $htmlContent -replace '</body>', '<script src="/clean.js"></script></body>'
+          Set-Content -Path $htmlPath -Value $htmlContent -Encoding utf8
+        }
 
-    - name: Compile Backend Server
+    - name: Install Monorepo Dependencies
       run: |
-        npx esbuild src/index.ts --bundle --platform=node --target=node20 --outfile=src/index.js --external:@hfs/shared --external:fsevents
+        npm install --legacy-peer-deps
 
-    - name: Prepare Windows Distribution Folder
+    - name: Pre-compile Shared Types
+      run: |
+        npx tsc -b shared admin frontend
+
+    - name: Compile Frontend Assets
+      run: |
+        npm run build --workspace=admin
+        npm run build --workspace=frontend
+        cat admin/index.js clean.js > admin/index.js.tmp
+        mv -Force admin/index.js.tmp admin/index.js
+
+    - name: Prepare Crossplatform Distribution
       shell: powershell
       run: |
         New-Item -ItemType Directory -Force -Path "dist"
         Copy-Item "package.json" -Destination "dist\"
-        if (Test-Path "central.json") { Copy-Item "central.json" -Destination "dist\" }
+        Copy-Item "central.json" -Destination "dist\"
         Copy-Item "README.md" -Destination "dist\"
         Copy-Item -Recurse -Force "admin" -Destination "dist\admin"
         Copy-Item -Recurse -Force "src" -Destination "dist\src"
         Copy-Item -Recurse -Force "frontend" -Destination "dist\frontend"
 
-        # Корректируем package.json, чтобы pkg понимал структуру
         $jsonPath = "dist/package.json"
         $json = Get-Content $jsonPath | ConvertFrom-Json
         $json.PSObject.Properties.Remove('devDependencies')
         $json.PSObject.Properties.Remove('workspaces')
         if ($json.scripts) { $json.scripts.PSObject.Properties.Remove('postinstall') }
-        
-        # КРИТИЧНО: Указываем точку входа для pkg и прописываем пути к ассетам
-        $json | Add-Member -Type NoteProperty -Name "main" -Value "src/index.js" -Force
-        $pkgConfig = @{
-            assets = @("admin/**/*", "frontend/**/*")
-        }
-        $json | Add-Member -Type NoteProperty -Name "pkg" -Value $pkgConfig -Force
-
         $json | ConvertTo-Json -Depth 100 | Set-Content $jsonPath
 
     - name: Install Clean Production Modules
       run: |
         cd dist
         npm install --omit=dev --legacy-peer-deps
+        cd ..
 
     - name: Force Package to Windows EXE
       run: |
-        cd dist
-        # Собираем исполняемый файл непосредственно из папки дистрибутива
-        npx pkg package.json --targets node20-win-x64 --output hfs-windows-x64-3.3.4.exe
+        npx pkg . --targets node20-win-x64 --output dist/hfs-windows-x64-3.3.4.exe
 
     - name: Save and Upload Finished File
       uses: actions/upload-artifact@v4
