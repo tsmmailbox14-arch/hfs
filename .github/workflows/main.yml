@@ -16,7 +16,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: 20
+        node-version: 24
 
     - name: Inject Cleanup Script
       shell: powershell
@@ -102,7 +102,7 @@ jobs:
 
     - name: Force Package to Windows EXE
       run: |
-        npx pkg . --targets node20-win-x64 --output dist/hfs-windows-x64-3.3.4.exe
+        npx pkg . --targets node22-win-x64 --output dist/hfs-windows-x64-3.3.4.exe
 
     - name: Save and Upload Finished File
       uses: actions/upload-artifact@v4
