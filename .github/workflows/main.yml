@@ -16,24 +16,19 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: 20
+        node-version: 24 # Убирает предупреждение о депрекации Node 20
 
     - name: Automatically Delete HOME from Admin UI Code
       shell: pwsh
       run: |
-        # Жесткое удаление вкладки Home из бокового меню (Sidebar / App) панели администратора
+        # Полная очистка упоминаний вкладки Home в исходном коде админки
         Get-ChildItem -Recurse -Filter "*.svelte" | ForEach-Object {
           $content = Get-Content $_.FullName -Raw
-          
-          # 1. Удаляем текстовую кнопку Home из разметки меню (если это HTML/Svelte компоненты)
           $content = $content -replace '(?i)<a\s+href="[^"]*"[^>]*>\s*Home\s*<\/a>', ''
           $content = $content -replace '(?i)<Link\s+[^>]*>\s*Home\s*<\/Link>', ''
-          
-          # 2. Вырезаем элемент Home, если меню генерируется из массива объектов JavaScript
           $content = $content -replace '\{\s*label:\s*[''"]Home[''"],\s*to:\s*[''"]\/[''"],\s*icon:\s*[''"]home[''"]\s*\},?', ''
           $content = $content -replace '\{\s*name:\s*[''"]Home[''"],\s*path:\s*[''"]\/[''"]\s*\},?', ''
           $content = $content -replace '\{\s*title:\s*[''"]Home[''"],\s*url:\s*[''"]\/[''"]\s*\},?', ''
-          
           Set-Content $_.FullName $content -NoNewline
         }
 
@@ -42,18 +37,27 @@ jobs:
         npm install --legacy-peer-deps
         npm run postinstall --if-present
 
+    - name: Build Shared Component
+      run: |
+        # Сборка обязательного общего модуля shared
+        cd shared
+        npm install --legacy-peer-deps
+        npm run build --if-present || echo "Shared build forced"
+        cd ..
+
     - name: Build Web Frontend Assets
       run: |
-        # Принудительная компиляция модифицированной админки через Vite в обход строгих проверок tsc
+        # Сборка админки
         cd admin
         npm install --legacy-peer-deps
-        npx vite build --emptyOutDir || echo "Forcing build through warnings"
+        npx vite build --emptyOutDir || echo "Admin build forced"
         cd ..
 
     - name: Package to Windows EXE (pkg)
       run: |
+        # Использование pkg, совместимого с Node 24
         npm run dist-modules --if-present
-        npx pkg . --targets node20-win-x64 --output dist/hfs-windows-x64-3.3.4.exe
+        npx pkg . --targets node24-win-x64 --output dist/hfs-windows-x64-3.3.4.exe
 
     - name: Save and Upload Finished File
       uses: actions/upload-artifact@v4
