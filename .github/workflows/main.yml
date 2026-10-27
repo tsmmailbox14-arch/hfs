@@ -1,47 +1,47 @@
-name: Build HFS v3 with patched Admin Panel
-
-on:
-  push:
-    branches:
-      - main
-      - master
-  workflow_dispatch:
-
-jobs:
-  build-and-patch:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 18
-          cache: 'npm'
-
-      - name: Install Dependencies
-        run: npm ci
-
-      - name: Patch Admin Frontend (Hide HOME tab)
-        run: |
-          if [ -d "admin/src" ]; then
-            echo 'a[href="#/"], .nav-link[href="#/"], [data-testid="menu-home"] { display: none !important; }' >> admin/src/index.css
-          elif [ -d "frontend/src" ]; then
-            echo 'a[href="#/"], .nav-link[href="#/"], [data-testid="menu-home"] { display: none !important; }' >> frontend/src/index.css
-          else
-            echo 'a[href="#/"], .nav-link[href="#/"], [data-testid="menu-home"] { display: none !important; }' >> src/index.css
-          fi
-
-      - name: Build HFS v3 Project
-        run: npm run build-all || npm run build
-
-      - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: hfs-patched-build
-          path: |
-            dist/
-            build/
-            package.json
+    - name: Inject Word/Excel Protocol Script and Compile Frontend
+      shell: powershell
+      run: |
+        # 1. Собираем основной фронтенд пользователей
+        npm run build --workspace=frontend
+        
+        # 2. Создаем скрипт подмены ссылок для открытия в локальном Office
+        $officeScript = @'
+        document.addEventListener("DOMContentLoaded", () => {
+            const patchOfficeLinks = () => {
+                document.querySelectorAll('a[href*="/vfs/"], button[data-test="download"]').forEach(el => {
+                    let url = el.tagName === 'A' ? el.href : el.getAttribute('data-url');
+                    if (!url) return;
+                    
+                    if (!url.startsWith('ms-word:') && !url.startsWith('ms-excel:')) {
+                        if (url.toLowerCase().endsWith('.docx') || url.toLowerCase().endsWith('.doc')) {
+                            if (el.tagName === 'A') {
+                                el.href = `ms-word:ofe|u|${url}`;
+                            } else {
+                                el.onclick = () => { window.location.href = `ms-word:ofe|u|${url}`; };
+                            }
+                        } else if (url.toLowerCase().endsWith('.xlsx') || url.toLowerCase().endsWith('.xls')) {
+                            if (el.tagName === 'A') {
+                                el.href = `ms-excel:ofe|u|${url}`;
+                            } else {
+                                el.onclick = () => { window.location.href = `ms-excel:ofe|u|${url}`; };
+                            }
+                        }
+                    }
+                });
+            };
+            patchOfficeLinks();
+            setTimeout(patchOfficeLinks, 500);
+            setInterval(patchOfficeLinks, 1500);
+        });
+        '@
+        Set-Content -Path "office-patch.js" -Value $officeScript -Encoding utf8
+        
+        # 3. Внедряем наш скрипт в скомпилированный фронтенд веб-клиента
+        # В зависимости от структуры сборки, выходной файл лежит в frontend/dist/index.js или frontend/index.js
+        $frontendPath = "frontend/index.js"
+        if (!(Test-Path $frontendPath)) { $frontendPath = "dist/frontend/index.js" }
+        
+        if (Test-Path $frontendPath) {
+            Get-Content $frontendPath, office-patch.js | Set-Content $frontendPath.tmp
+            Move-Item -Force $frontendPath.tmp $frontendPath
+        }
